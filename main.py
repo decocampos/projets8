@@ -1,5 +1,5 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QMessageBox, QInputDialog, QComboBox, QPushButton, QDialog, QLabel, QHBoxLayout
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QMessageBox, QInputDialog, QComboBox, QPushButton, QDialog, QLabel, QHBoxLayout, QListWidget
 from PyQt5.QtCore import Qt
 import pandas as pd
 from modules import data_loader, eda, visualization, mining
@@ -30,6 +30,10 @@ class MainWindow(QMainWindow):
         heat_action = QAction('Correlation Heatmap', self)
         heat_action.triggered.connect(self.show_heatmap)
         vis_menu.addAction(heat_action)
+        # New: Categorical by Target
+        cat_by_target_action = QAction('Categorical by Target', self)
+        cat_by_target_action.triggered.connect(self.show_categorical_by_target)
+        vis_menu.addAction(cat_by_target_action)
 
         # Data Mining menu
         mining_menu = menubar.addMenu('Data Mining')
@@ -55,6 +59,19 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget()
         layout = QVBoxLayout()
         layout.addWidget(self.table)
+
+        # Add buttons for column deletion and value insertion
+        button_layout = QHBoxLayout()
+        self.delete_col_btn = QPushButton("Delete Column")
+        self.delete_col_btn.clicked.connect(self.delete_column)
+        self.insert_val_btn = QPushButton("Insert Value")
+        self.insert_val_btn.clicked.connect(self.insert_value)
+        button_layout.addWidget(self.delete_col_btn)
+        button_layout.addWidget(self.insert_val_btn)
+        layout.addLayout(button_layout)
+
+        self.update_buttons_state()
+
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
@@ -62,30 +79,41 @@ class MainWindow(QMainWindow):
     def load_data(self):
         df, path = data_loader.load_data(self)
         if df is not None:
+            # Convert object columns to category
+            for col in df.select_dtypes(include=['object']).columns:
+                df[col] = df[col].astype('category')
             self.df = df
             self.show_data(df)
             self.setWindowTitle(f"PyDataMiner - {path}")
         else:
             QMessageBox.warning(self, "Load Data", "No file loaded or unsupported format.")
+        self.update_buttons_state()
 
     def show_data(self, df):
         self.table.setRowCount(0)
         self.table.setColumnCount(0)
         self.table.clear()
-        self.table.setColumnCount(len(df.columns))
-        self.table.setHorizontalHeaderLabels(df.columns)
-        for i, row in df.iterrows():
-            self.table.insertRow(i)
-            for j, val in enumerate(row):
-                self.table.setItem(i, j, QTableWidgetItem(str(val)))
-            if i > 99:
-                break  # Display only first 100 rows for performance
+        if df is not None and not df.empty:
+            self.table.setColumnCount(len(df.columns))
+            self.table.setHorizontalHeaderLabels(df.columns)
+            for i, row in df.iterrows():
+                self.table.insertRow(i)
+                for j, val in enumerate(row):
+                    self.table.setItem(i, j, QTableWidgetItem(str(val)))
+                if i > 99:
+                    break  # Display only first 100 rows for performance
+        self.update_buttons_state()
 
     def show_histogram(self):
         if self.df is None:
             QMessageBox.warning(self, "No Data", "Please load data first.")
             return
-        col, ok = QInputDialog.getItem(self, "Select Column", "Column:", list(self.df.columns), 0, False)
+        # Only allow numeric columns
+        numeric_cols = [col for col in self.df.columns if pd.api.types.is_numeric_dtype(self.df[col])]
+        if not numeric_cols:
+            QMessageBox.warning(self, "No Numeric Columns", "No numeric columns available for histogram.")
+            return
+        col, ok = QInputDialog.getItem(self, "Select Column", "Column:", numeric_cols, 0, False)
         if ok:
             visualization.plot_histogram(self.df, col)
 
@@ -102,6 +130,22 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Data", "Please load data first.")
             return
         visualization.plot_heatmap(self.df)
+
+    def show_categorical_by_target(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "Please load data first.")
+            return
+        # Only allow categorical columns
+        cat_cols = [col for col in self.df.select_dtypes(include=['category']).columns]
+        if not cat_cols:
+            QMessageBox.warning(self, "No Categorical", "No categorical columns available.")
+            return
+        target_col, ok = QInputDialog.getItem(self, "Select Target", "Target variable:", cat_cols, 0, False)
+        if ok and target_col:
+            try:
+                visualization.plot_categorical_by_target(self.df, target_col)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
     def show_summary(self):
         if self.df is None:
@@ -169,13 +213,77 @@ class MainWindow(QMainWindow):
         if self.df is None:
             QMessageBox.warning(self, "No Data", "Please load data first.")
             return
+        # Show elbow plot for K selection
+        try:
+            visualization.plot_elbow_kmeans(self.df)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in elbow plot: {e}")
+            return
         n, ok = QInputDialog.getInt(self, "Clusters", "Number of clusters:", 3, 2, 10, 1)
         if ok:
             try:
                 labels = mining.cluster_kmeans(self.df, n)
+                visualization.plot_clusters_kmeans(self.df, labels)
                 QMessageBox.information(self, "Clustering", f"Cluster labels assigned to {len(labels)} rows.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
+
+    def update_buttons_state(self):
+        has_data = self.df is not None and not self.df.empty
+        self.delete_col_btn.setEnabled(has_data)
+        self.insert_val_btn.setEnabled(not has_data)
+
+    def delete_column(self):
+        if self.df is None or self.df.empty:
+            QMessageBox.warning(self, "No Data", "No data to delete columns from.")
+            return
+        dlg = MultiColumnSelectDialog(self, list(self.df.columns))
+        if dlg.exec_() == QDialog.Accepted:
+            selected_cols = dlg.get_selected_columns()
+            if selected_cols:
+                self.df.drop(columns=selected_cols, inplace=True)
+                self.show_data(self.df)
+
+    def insert_value(self):
+        if self.df is not None and not self.df.empty:
+            QMessageBox.warning(self, "Data Exists", "Insert is only allowed when there is no data.")
+            return
+        col, ok1 = QInputDialog.getText(self, "Insert Value", "Enter column name:")
+        if not ok1 or not col:
+            return
+        val, ok2 = QInputDialog.getText(self, "Insert Value", f"Enter value for column '{col}':")
+        if not ok2:
+            return
+        # Create a new DataFrame with the value
+        self.df = pd.DataFrame({col: [val]})
+        self.show_data(self.df)
+
+class MultiColumnSelectDialog(QDialog):
+    def __init__(self, parent, columns):
+        super().__init__(parent)
+        self.setWindowTitle("Delete Columns")
+        self.selected_columns = []
+        layout = QVBoxLayout()
+        label = QLabel("Select columns to delete:")
+        layout.addWidget(label)
+        self.list_widget = QListWidget()
+        self.list_widget.addItems(columns)
+        self.list_widget.setSelectionMode(QListWidget.MultiSelection)
+        layout.addWidget(self.list_widget)
+        button_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+        self.resize(300, 400)
+
+    def get_selected_columns(self):
+        return [item.text() for item in self.list_widget.selectedItems()]
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
