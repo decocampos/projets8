@@ -97,6 +97,57 @@ def plot_heatmap(df):
         plt.text(0.5, 0.5, "Not enough numeric columns for correlation heatmap", ha='center', va='center')
         plt.axis('off')
         plt.show()
+        return
+    corr = numeric_df.corr()
+    plt.figure(figsize=(8,6))
+    sns.heatmap(corr, annot=True, cmap='coolwarm', fmt='.2f', square=True)
+    plt.title('Correlation Heatmap')
+    plt.tight_layout()
+    plt.show()
+
+def plot_countplot(df, column):
+    plt.figure(figsize=(7,5))
+    sns.countplot(data=df, x=column)
+    plt.title(f"Countplot of {column}")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def plot_pairplot(df, selected_cols):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    sns.pairplot(df[selected_cols].dropna())
+    plt.suptitle(f"Pairplot: {', '.join(selected_cols)}", y=1.02)
+    plt.show()
+
+def plot_jointplot(df, col1, col2):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    g = sns.jointplot(data=df, x=col1, y=col2, kind='scatter')
+    g.fig.suptitle(f'Jointplot: {col1} vs {col2}', y=1.02)
+    plt.show()
+
+def plot_regression(df, x_col, y_col, regression_result):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    score, reg = regression_result if isinstance(regression_result, tuple) else (regression_result, None)
+    X = df[[x_col]].dropna()
+    y = df[y_col].dropna()
+    # align X and y
+    df_xy = df[[x_col, y_col]].dropna()
+    X = df_xy[x_col]
+    y = df_xy[y_col]
+    plt.figure(figsize=(7,5))
+    plt.scatter(X, y, color='blue', label='Data')
+    if reg is not None:
+        y_pred = reg.predict(X.values.reshape(-1,1))
+        plt.plot(X, y_pred, color='red', label='Regression Line')
+    plt.xlabel(x_col)
+    plt.ylabel(y_col)
+    plt.title(f'Regression: {y_col} ~ {x_col}\nR² = {score:.3f}')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 def plot_elbow_kmeans(df):
     from sklearn.preprocessing import StandardScaler

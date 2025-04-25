@@ -22,18 +22,20 @@ def classify_rf(df, target_col, test_size=0.2):
         'report': classification_report(y_test, y_pred)
     }
 
-def regress_linear(df, target_col, test_size=0.2):
-    # Only use numeric columns for X
-    X = df.select_dtypes(include=['number']).drop(columns=[target_col], errors='ignore')
-    y = df[target_col]
-    # Ensure y is numeric
+def regress_linear(df, y_col, x_col, test_size=0.2):
+    # Use only the specified columns
+    X = df[[x_col]]
+    y = df[y_col]
+    # Ensure both are numeric
+    if not pd.api.types.is_numeric_dtype(X[x_col]):
+        raise ValueError(f"X column '{x_col}' must be numeric for regression.")
     if not pd.api.types.is_numeric_dtype(y):
-        raise ValueError(f"Target column '{target_col}' must be numeric for regression.")
+        raise ValueError(f"Y column '{y_col}' must be numeric for regression.")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
     reg = LinearRegression()
     reg.fit(X_train, y_train)
     y_pred = reg.predict(X_test)
-    return reg.score(X_test, y_test)
+    return reg.score(X_test, y_test), reg
 
 def cluster_kmeans(df, n_clusters=3):
     # Convert categorical variables to binary (one-hot)

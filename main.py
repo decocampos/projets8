@@ -19,6 +19,15 @@ class MainWindow(QMainWindow):
         load_action.triggered.connect(self.load_data)
         file_menu.addAction(load_action)
 
+        # Save As submenu
+        save_menu = file_menu.addMenu('Save As')
+        save_csv_action = QAction('Save as CSV', self)
+        save_csv_action.triggered.connect(self.save_as_csv)
+        save_menu.addAction(save_csv_action)
+        save_excel_action = QAction('Save as Excel', self)
+        save_excel_action.triggered.connect(self.save_as_excel)
+        save_menu.addAction(save_excel_action)
+
         # Visualization menu
         vis_menu = menubar.addMenu('Visualization')
         hist_action = QAction('Histogram', self)
@@ -30,10 +39,22 @@ class MainWindow(QMainWindow):
         heat_action = QAction('Correlation Heatmap', self)
         heat_action.triggered.connect(self.show_heatmap)
         vis_menu.addAction(heat_action)
-        # New: Categorical by Target
         cat_by_target_action = QAction('Categorical by Target', self)
         cat_by_target_action.triggered.connect(self.show_categorical_by_target)
         vis_menu.addAction(cat_by_target_action)
+
+        # Countplot for categorical variable
+        countplot_action = QAction('Countplot (Categorical)', self)
+        countplot_action.triggered.connect(self.show_countplot)
+        vis_menu.addAction(countplot_action)
+
+        # Pairplot and Jointplot
+        pairplot_action = QAction('Pairplot (Numeric)', self)
+        pairplot_action.triggered.connect(self.show_pairplot)
+        vis_menu.addAction(pairplot_action)
+        jointplot_action = QAction('Jointplot (Numeric)', self)
+        jointplot_action.triggered.connect(self.show_jointplot)
+        vis_menu.addAction(jointplot_action)
 
         # Data Mining menu
         mining_menu = menubar.addMenu('Data Mining')
@@ -55,6 +76,9 @@ class MainWindow(QMainWindow):
         missing_action = QAction('Missing Values', self)
         missing_action.triggered.connect(self.show_missing)
         eda_menu.addAction(missing_action)
+        discretize_action = QAction('Discretize Variable', self)
+        discretize_action.triggered.connect(self.show_discretize_variable)
+        eda_menu.addAction(discretize_action)
 
         self.table = QTableWidget()
         layout = QVBoxLayout()
@@ -88,6 +112,46 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Load Data", "No file loaded or unsupported format.")
         self.update_buttons_state()
+
+    def show_countplot(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "Please load data first.")
+            return
+        # Only allow categorical columns
+        cat_cols = [col for col in self.df.select_dtypes(include=['category']).columns]
+        if not cat_cols:
+            QMessageBox.warning(self, "No Categorical", "No categorical columns available.")
+            return
+        col, ok = QInputDialog.getItem(self, "Select Column", "Categorical column:", cat_cols, 0, False)
+        if ok and col:
+            try:
+                visualization.plot_countplot(self.df, col)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def save_as_csv(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "No data to save.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save as CSV", "", "CSV Files (*.csv)")
+        if path:
+            try:
+                self.df.to_csv(path, index=False)
+                QMessageBox.information(self, "Save CSV", f"File saved: {path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def save_as_excel(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "No data to save.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save as Excel", "", "Excel Files (*.xlsx *.xls)")
+        if path:
+            try:
+                self.df.to_excel(path, index=False)
+                QMessageBox.information(self, "Save Excel", f"File saved: {path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
     def show_data(self, df):
         self.table.setRowCount(0)
@@ -201,13 +265,22 @@ class MainWindow(QMainWindow):
         if self.df is None:
             QMessageBox.warning(self, "No Data", "Please load data first.")
             return
-        col, ok = QInputDialog.getItem(self, "Target Column", "Select target column:", list(self.df.columns), 0, False)
-        if ok:
-            try:
-                score = mining.regress_linear(self.df, col)
-                QMessageBox.information(self, "Regression R^2", f"R^2 Score: {score:.3f}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
+        numeric_cols = [col for col in self.df.select_dtypes(include=['number']).columns]
+        if len(numeric_cols) < 2:
+            QMessageBox.warning(self, "Not Enough Numeric Columns", "Need at least 2 numeric columns for regression.")
+            return
+        x_col, ok1 = QInputDialog.getItem(self, "Select X Variable", "Select independent variable (X):", numeric_cols, 0, False)
+        if not ok1:
+            return
+        y_col, ok2 = QInputDialog.getItem(self, "Select Y Variable", "Select dependent variable (Y):", [col for col in numeric_cols if col != x_col], 0, False)
+        if not ok2:
+            return
+        try:
+            import modules.visualization as visualization
+            score = mining.regress_linear(self.df, y_col, x_col)
+            visualization.plot_regression(self.df, x_col, y_col, score)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
     def run_clustering(self):
         if self.df is None:
@@ -238,11 +311,73 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Data", "No data to delete columns from.")
             return
         dlg = MultiColumnSelectDialog(self, list(self.df.columns))
+        dlg.setWindowTitle("Select Multiple Variables")
         if dlg.exec_() == QDialog.Accepted:
             selected_cols = dlg.get_selected_columns()
             if selected_cols:
-                self.df.drop(columns=selected_cols, inplace=True)
-                self.show_data(self.df)
+                reply = QMessageBox.question(self, "Confirm Deletion", f"Are you sure you want to delete column(s): {', '.join(selected_cols)}?", QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.df.drop(columns=selected_cols, inplace=True)
+                    self.show_data(self.df)
+
+    def show_pairplot(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "Please load data first.")
+            return
+        numeric_cols = [col for col in self.df.select_dtypes(include=['number']).columns]
+        if len(numeric_cols) < 2:
+            QMessageBox.warning(self, "Not Enough Numeric Columns", "Need at least 2 numeric columns for pairplot.")
+            return
+        # Multi-selection dialog
+        dlg = MultiColumnSelectDialog(self, numeric_cols)
+        dlg.setWindowTitle("Select Multiple Variables")
+        if dlg.exec_() == QDialog.Accepted:
+            selected_cols = dlg.get_selected_columns()
+            if len(selected_cols) < 2:
+                QMessageBox.warning(self, "Select Variables", "Please select at least 2 numeric variables.")
+                return
+            import modules.visualization as visualization
+            visualization.plot_pairplot(self.df, selected_cols)
+
+    def show_jointplot(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "Please load data first.")
+            return
+        numeric_cols = [col for col in self.df.select_dtypes(include=['number']).columns]
+        if len(numeric_cols) < 2:
+            QMessageBox.warning(self, "Not Enough Numeric Columns", "Need at least 2 numeric columns for jointplot.")
+            return
+        col1, ok1 = QInputDialog.getItem(self, "Select X Variable", "X variable:", numeric_cols, 0, False)
+        if not ok1:
+            return
+        col2, ok2 = QInputDialog.getItem(self, "Select Y Variable", "Y variable:", numeric_cols, 0, False)
+        if not ok2 or col1 == col2:
+            return
+        import modules.visualization as visualization
+        visualization.plot_jointplot(self.df, col1, col2)
+
+    def show_discretize_variable(self):
+        if self.df is None:
+            QMessageBox.warning(self, "No Data", "Please load data first.")
+            return
+        numeric_cols = [col for col in self.df.select_dtypes(include=['number']).columns]
+        if not numeric_cols:
+            QMessageBox.warning(self, "No Numeric Columns", "No numeric columns available for discretization.")
+            return
+        col, ok = QInputDialog.getItem(self, "Select Variable", "Numeric variable:", numeric_cols, 0, False)
+        if not ok:
+            return
+        bins, ok2 = QInputDialog.getInt(self, "Number of bins", "How many bins?", 4, 2, 20, 1)
+        if not ok2:
+            return
+        import pandas as pd
+        new_col = f"{col}_bin"
+        try:
+            self.df[new_col] = pd.cut(self.df[col], bins)
+            self.show_data(self.df)
+            QMessageBox.information(self, "Discretization", f"Column '{new_col}' added.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
     def insert_value(self):
         if self.df is not None and not self.df.empty:
@@ -264,7 +399,7 @@ class MultiColumnSelectDialog(QDialog):
         self.setWindowTitle("Delete Columns")
         self.selected_columns = []
         layout = QVBoxLayout()
-        label = QLabel("Select columns to delete:")
+        label = QLabel("Select columns:")
         layout.addWidget(label)
         self.list_widget = QListWidget()
         self.list_widget.addItems(columns)
