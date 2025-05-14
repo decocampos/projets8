@@ -230,16 +230,10 @@ class MainWindow(QMainWindow):
         if self.df is None:
             QMessageBox.warning(self, "No Data", "Please load data first.")
             return
-        missing = eda.get_missing_values(self.df)
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Missing Values")
-        layout = QVBoxLayout()
-        label = QLabel(missing.to_string())
-        label.setTextInteractionFlags(label.textInteractionFlags() | Qt.TextSelectableByMouse)
-        layout.addWidget(label)
-        dlg.setLayout(layout)
-        dlg.resize(500, 300)
-        dlg.exec_()
+        dialog = eda.MissingValuesDialog(self, self.df)
+        dialog.exec_()
+        self.df = dialog.df
+        self.show_data(self.df)
 
     def run_classification(self):
         if self.df is None:
